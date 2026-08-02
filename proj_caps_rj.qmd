@@ -1,0 +1,542 @@
+---
+title: "Territorialização da RAPS no Estado do Rio de Janeiro (2025)"
+author: "Jessé da Silva Lima"
+format: html
+editor: visual
+---
+
+# Territorialização e Fluxos da Rede de Atenção Psicossocial (RAPS) no Estado do Rio de Janeiro
+
+## 1. Pacotes a serem utilizados
+
+```{r}
+# Caso não tenha baixado, utilize o código abaixo:
+# install.packages(c("microdatasus", "dplyr", "stringr", "ggplot2", "sf", "geobr", "tidyr"))
+
+library(microdatasus)
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(sf)
+library(geobr)
+library(tidyr)
+```
+
+## 2. Looping para Instalar Todos os Meses sem Travar
+
+Looping de download do SIA/DATASUS para as 12 competências de 2025 e filtragem da Forma de Organização \`030108\` (CAPS).
+
+```{r}
+# 1. Configurando o ano e criando uma lista vazia para armazenar os recortes
+ano_analise <- 2025
+meses <- 1:12
+lista_meses_caps <- list() # Esta lista vai guardar apenas as tabelas "leves"
+
+# 2. Criando o Loop: O R fará o download e a limpeza repetidamente para cada mês
+for (mes in meses) 
+  
+  # Imprime no console em qual mês o R está trabalhando (bom para você acompanhar) cat("Processando mês:", mes, "de", ano_analise, "\n")
+  
+  # PASSO A: Download de um único mês
+  sia_bruto <- fetch_datasus(
+    year_start = ano_analise, month_start = mes,
+    year_end = ano_analise, month_end = mes,
+    uf = "RJ",
+    information_system = "SIA-PA"
+  )
+  
+  # PASSO B: Processamento do microdatasus
+  sia_proc <- process_sia(sia_bruto)
+  
+  # PASSO C: Filtragem Imediata (Isolando apenas os serviços CAPS)
+  sia_caps_leve <- sia_proc |>
+    select(Origem = PA_MUNPCN, Destino = PA_UFMUN, PA_PROC_ID, PA_QTDPRO) |>
+    filter(str_starts(as.character(PA_PROC_ID), "030108")) |>
+  mutate(
+      PA_QTDPRO = as.numeric(PA_QTDPRO),
+      mes_competencia = mes) # Adiciona uma coluna indicando o mês, essencial para a sua análise de dinâmica!
+```
+
+## 3. Criando a Malha Geográfica e os Centroides
+
+```{r}
+# Filtrando o código do estado e retirando valores nulos
+tabela_evolucao_mensal <- fluxo_caps_2025 |>
+  drop_na(Origem, Destino) |>
+  filter(str_starts(Origem, "33") & str_starts(Destino, "33")) |>
+  
+  # Mudando a ID do mês de número para as iniciais
+  mutate(
+    mes_nome = factor(
+      mes_competencia, 
+      levels = 1:12, 
+      labels = c("Jan", "Fev", "Mar", "Abr", "Mai", "Jun", 
+                 "Jul", "Ago", "Set", "Out", "Nov", "Dez")
+    )
+  ) |>
+  
+  # Agrupando e desagrupando
+  group_by(Origem, Destino, mes_nome) |>
+  summarise(atendimentos = sum(PA_QTDPRO, na.rm = TRUE), .groups = "drop") |>
+  
+  # Separando os meses para colunas separadas
+  pivot_wider(
+    names_from = mes_nome, 
+    values_from = atendimentos,
+    values_fill = 0 # Se não houve fluxo naquele mês específico, preenche com zero
+  ) |>
+  
+  # Somando os valores para gerar o dado anual
+  rowwise() |>
+  mutate(Total_Ano = sum(c_across(Jan:Dez), na.rm = TRUE)) |>
+  ungroup() |>
+  
+  # Ordem decrescente
+arrange(desc(Total_Ano)) 
+
+print(tabela_evolucao_mensal)
+```
+
+## 4. Cruzando a Tabela Anual com os Centroides
+
+```{r}
+# Baixando malha no campo de estudo
+malha_rj <- read_municipality(code_muni = "RJ", year = 2023, showProgress = FALSE)|>
+  # Código com 6 dígitos
+  mutate(code_muni = str_sub(as.character(code_muni), 1, 6))
+
+# Calculando o ponto certo do centróide dos municípios
+centroides_geo <- malha_rj |>
+  st_centroid() 
+
+# Coordenadas dos centróides
+coords <- st_coordinates(centroides_geo)
+
+# Ajuda de IA para deixar essa tabela mais leve, com menos informações
+centroides <- centroides_geo |>
+  st_drop_geometry() |>
+  mutate(
+    lon = coords[, 1],
+    lat = coords[, 2]
+  ) |>
+  select(code_muni, name_muni, lon, lat)
+```
+
+```{r}
+# Criando a tabela intermunicipal mensal já com os nomes das cidades e coordenadas
+tabela_intermunicipal_mensal <- tabela_evolucao_mensal |>
+  # Mantém apenas os atendimentos fora do município de origem
+  filter(Origem != Destino) |>
+  
+  # Cruza os dados da Origem
+  left_join(centroides, by = c("Origem" = "code_muni")) |>
+  rename( # Mudei o nome para algo mais simples
+    nome_origem = name_muni,
+    lon_origem = lon,
+    lat_origem = lat
+  ) |>
+  
+  # Cruza os dados do Destino
+  left_join(centroides, by = c("Destino" = "code_muni")) |>
+  rename( 
+    nome_destino = name_muni,
+    lon_destino = lon,
+    lat_destino = lat
+  ) |>
+  
+  # Reorganiza a ordem das colunas
+  select(
+    Origem, nome_origem, lon_origem, lat_origem,
+    Destino, nome_destino, lon_destino, lat_destino,
+    Jan, Fev, Mar, Abr, Mai, Jun, 
+    Jul, Ago, Set, Out, Nov, Dez, 
+    Total_Ano
+  ) |>
+  
+  # Ordena pelos municípios com maior fluxo no ano
+  arrange(desc(Total_Ano)) |>
+  
+  # Removendo NA
+  drop_na(lon_origem, lat_origem, lon_destino, lat_destino)
+
+# Verifica como a tabela ficou
+head(tabela_intermunicipal_mensal)
+```
+
+## 5. Mapa de Fluxo Intermunicipal
+
+```{r}
+# Criando as categorias de volume baseadas no Total Anual
+
+tabela_mapa_fluxo <- tabela_intermunicipal_mensal |>
+  mutate(
+    faixa_atendimento = cut(
+      Total_Ano,
+      # Limite das Classes
+      breaks = c(0, 50, 150, 300, 500, Inf),
+      # Legendas
+      labels = c("1 a 50", "51 a 150", "151 a 300", "301 a 500", "500+"),
+      include.lowest = TRUE,
+      right = TRUE
+    )
+  )
+
+# Mapa de Fluxo
+  ggplot() +
+  geom_sf(data = malha_rj, fill = "gray95", color = "gray40", size = 0.2) +
+  
+  # Municípios de Origem representados por pontos
+  geom_point(
+    data = distinct(tabela_mapa_fluxo, Origem, .keep_all = TRUE),
+    aes(x = lon_origem, y = lat_origem, color = "Município de Origem"),
+    size = 2.0
+  ) +
+  
+  # Fluxo Intermunicipal
+  geom_curve(
+    data = tabela_mapa_fluxo,
+    aes(
+      x = lon_origem, y = lat_origem, 
+      xend = lon_destino, yend = lat_destino, 
+      linewidth = faixa_atendimento, 
+      alpha = faixa_atendimento      
+    ),
+    curvature = 0.2,   
+    arrow = arrow(length = unit(0.05, "inches"), type = "closed"), 
+    color = "brown"  
+  ) +
+  
+  scale_linewidth_manual(
+    values = c(0.6, 1.0, 1.6, 2.2, 3.0) #Espessura das linhas
+  ) + 
+  scale_alpha_manual(
+    values = c(0.3, 0.4, 0.5, 0.6, 0.8) #Transparência das linhas
+  ) +
+  
+  # Legenda dos Pontos
+  scale_color_manual(
+    name = "Localização",
+    values = c("Município de Origem" = "firebrick1")
+  ) +
+  
+  theme_void() +
+  labs(
+    title = "Fluxo Intermunicipal de Atendimento Ambulatorial (CAPS)",
+    subtitle = "Estado do Rio de Janeiro (Acumulado do Ano - 2025)",
+    linewidth = "Volume de\nAtendimentos",
+    alpha = "Volume de\nAtendimentos",
+    color = "Localização",
+    caption = "Jessé Lima | Dados: SIA/DATASUS e geobr"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold", size = 13, hjust = 0.5),
+    plot.subtitle = element_text(size = 10, hjust = 0.5),
+    legend.position = "right",
+    legend.background = element_rect(fill = "white", color = "gray20", linewidth = 0.3)
+  )
+```
+
+## 6. Maiores Atendimentos Intermunicipais e Intramunicipais
+
+```{r}
+# Tabela de atendimentos intramunicipais
+tabela_intramunicipal <- tabela_evolucao_mensal |>
+  filter(Origem == Destino) |>
+  left_join(centroides, by = c("Origem" = "code_muni")) |>
+  rename(municipio = name_muni) |>
+  
+  # Organizando as colunas
+  select(
+    codigo_ibge = Origem, 
+    municipio, 
+    Jan, Fev, Mar, Abr, Mai, Jun, 
+    Jul, Ago, Set, Out, Nov, Dez, 
+    Total_Ano
+  ) |>
+  
+  # Ordenando o que mais atendeu para o que menos atendeu a pop residente
+  arrange(desc(Total_Ano))
+
+print(tabela_intramunicipal)
+```
+
+```{r}
+# Tabela de Ranking Intermunicipal
+tabela_top_intermunicipal <- tabela_intermunicipal_mensal |>
+  mutate(rota_fluxo = paste(nome_origem, "->", nome_destino)) |>
+  select(
+    rota_fluxo,
+    Total_Ano,
+    Jan, Fev, Mar, Abr, Mai, Jun, 
+    Jul, Ago, Set, Out, Nov, Dez
+  ) |>
+  
+  arrange(desc(Total_Ano)) |>
+  
+  # Top 20
+  slice_head(n = 20)
+
+print(tabela_top_intermunicipal)
+```
+
+## 7. Tabela com o Ranking Intramunicipal
+
+```{r}
+# Tabela de Ranking Intramunicipal
+tabela_intramunicipal |>
+  slice_head(n = 20) |> # Seleciona os 20 maiores
+  ggplot(aes(x = reorder(municipio, Total_Ano), y = Total_Ano)) +
+  
+  # Edição das barras
+  geom_col(fill = "steelblue", width = 0.7) +
+  coord_flip() + # Deita o gráfico para facilitar a leitura dos nomes
+  
+  # Numeração das barras
+  geom_text(
+    aes(label = scales::comma(Total_Ano, big.mark = ".", decimal.mark = ",")), 
+    hjust = -0.1, 
+    size = 3.5, 
+    fontface = "bold",
+    color = "black"
+  ) +
+  
+  # Espaçamento porque o eixo Y estava cortando
+  scale_y_continuous(
+    labels = scales::label_comma(big.mark = ".", decimal.mark = ","), 
+    expand = expansion(mult = c(0, 0.2))
+  ) +
+  
+  theme_minimal() +
+  labs(
+    title = "Top 20: Fluxo Intramunicipal de Pacientes (CAPS)",
+    subtitle = "Municípios com maior volume de atendimentos locais (2025)",
+    x = "Municípios",
+    y = "Total de Atendimentos Anuais",
+    caption = "Dados: SIA/DATASUS"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold", size = 12, hjust = 0.5),
+    plot.subtitle = element_text(size = 10, hjust = 0.5),
+    axis.title = element_text(face = "bold", size = 10),
+    panel.grid.major.y = element_blank() # Limpa as linhas horizontais de fundo
+  )
+```
+
+## 8. Gráfico Comparativo Intramunicipal x Intermunicipal:
+
+```{r}
+# Comparando Total Intra e Intermunicipal
+tabela_comparativo_geral <- tabela_evolucao_mensal |>
+  mutate(
+    tipo_atendimento = if_else(Origem == Destino, "Intramunicipal", "Intermunicipal")
+  ) |>
+  group_by(tipo_atendimento) |>
+  summarise(total_geral = sum(Total_Ano, na.rm = TRUE)) |>
+  mutate(
+    # Calcula a porcentagem
+    percentual = round((total_geral / sum(total_geral)) * 100, 1),
+    # Texto combinando título e percentagem
+    label_texto = paste0(
+      scales::comma(total_geral, big.mark = ".", decimal.mark = ","), 
+      " (", percentual, "%)"
+    )
+  )
+
+print(tabela_comparativo_geral)
+
+# Gráfico de Barras Comparativo
+ggplot(tabela_comparativo_geral, aes(x = tipo_atendimento, y = total_geral, fill = tipo_atendimento)) +
+  
+  # Inf das Barras
+  geom_col(width = 0.5, show.legend = FALSE) +
+  
+  # Texto acima das Barras
+  geom_text(
+    aes(label = label_texto), 
+    vjust = -0.8, 
+    size = 4.5, 
+    fontface = "bold"
+  ) +
+  
+  scale_fill_manual(
+    values = c("Intramunicipal" = "steelblue", "Intermunicipal" = "firebrick")
+  ) +
+  
+  scale_y_continuous(
+    labels = scales::label_comma(big.mark = ".", decimal.mark = ","), 
+    expand = expansion(mult = c(0, 0.2))
+  ) +
+  
+  theme_minimal() +
+  labs(
+    title = "Comparativo Geral de Atendimentos: Intramunicipal vs Intermunicipal",
+    subtitle = "Rede CAPS - Estado do Rio de Janeiro (Acumulado de 2025)",
+    x = "Tipo de Atendimento",
+    y = "Total de Procedimentos",
+    caption = "Dados: SIA/DATASUS"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold", size = 13, hjust = 0.5),
+    plot.subtitle = element_text(size = 11, hjust = 0.5),
+    axis.title = element_text(face = "bold", size = 10),
+    axis.text.x = element_text(size = 11, face = "bold"),
+    panel.grid.major.x = element_blank() # Remove as linhas verticais de grade
+  )
+```
+
+## 9. Gráfico dos Maiores Casos Intermunicipais (Vazios Assistenciais)
+
+```{r}
+# Gráfico das Top 20 rotas intermunicipais
+tabela_top_intermunicipal |>
+  ggplot(aes(x = reorder(rota_fluxo, Total_Ano), y = Total_Ano)) +
+  
+  geom_col(fill = "firebrick", width = 0.7) +
+  coord_flip() + 
+  
+  geom_text(
+    aes(label = scales::comma(Total_Ano, big.mark = ".", decimal.mark = ",")), 
+    hjust = -0.1, 
+    size = 3.5, 
+    fontface = "bold",
+    color = "black"
+  ) +
+  
+  scale_y_continuous(
+    labels = scales::label_comma(big.mark = ".", decimal.mark = ","), 
+    expand = expansion(mult = c(0, 0.2))
+  ) +
+  
+  theme_minimal() +
+  labs(
+    title = "Fluxo Intermunicipal (CAPS)",
+    subtitle = "As 20 maiores rotas de deslocamento de pacientes no RJ (2025)",
+    x = "Origem → Destino",
+    y = "Total de Atendimentos Anuais",
+    caption = "Dados: SIA/DATASUS"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold", size = 12, hjust = 0.5),
+    plot.subtitle = element_text(size = 10, hjust = 0.5),
+    axis.title = element_text(face = "bold", size = 10),
+    panel.grid.major.y = element_blank()
+  )
+```
+
+## 10. Identificando os Top 10 Municípios que mais exportam procedimentos
+
+```{r}
+# 10 municípios que mais exportam pacientes
+top10_municipios_exportadores <- tabela_evolucao_mensal |>
+  filter(Origem != Destino) |>
+  group_by(Origem) |>
+  summarise(total_inter = sum(Total_Ano, na.rm = TRUE)) |>
+  arrange(desc(total_inter)) |>
+  slice_head(n = 10) |>
+  pull(Origem) # Extrai apenas o código IBGE das 10 cidades
+
+# Tabela comparativa entre essas cidades
+tabela_top10_comparativa <- tabela_evolucao_mensal |>
+  filter(Origem %in% top10_municipios_exportadores) |>
+  left_join(centroides, by = c("Origem" = "code_muni")) |>
+  rename(municipio = name_muni) |>
+  
+  # Classifica se o atendimento foi dentro ou fora
+  mutate(
+    tipo_atendimento = if_else(Origem == Destino, "Intramunicipal (Na própria cidade)", "Intermunicipal (Viajou para fora)")
+  ) |>
+  
+  # Somando total anual por cidade
+  group_by(municipio, tipo_atendimento) |>
+  summarise(total = sum(Total_Ano, na.rm = TRUE), .groups = "drop_last") |>
+  
+  # Calculando a porcentagem que cada tipo representa dentro de cada município
+  mutate(
+    porcentagem = round((total / sum(total)) * 100, 1),
+    label_texto = paste0(scales::comma(total, big.mark = ".", decimal.mark = ","), " (", porcentagem, "%)")
+  ) |>
+  ungroup()
+
+# Exibindo os números no console para análise
+print(tabela_top10_comparativa)
+```
+
+```{r}
+# Tabela com o peso (%) de cada Município de Origem no fluxo intermunicipal total do RJ
+peso_intermunicipal_origem <- tabela_evolucao_mensal |>
+  # 1. Filtra apenas quem viajou para fora (Intermunicipal)
+  filter(Origem != Destino) |>
+  
+  # 2. Agrupa por Origem e soma todo o volume exportado por aquela cidade no ano
+  group_by(Origem) |>
+  summarise(total_exportado = sum(Total_Ano, na.rm = TRUE), .groups = "drop") |>
+  
+  # 3. Puxa o nome bonito da cidade de Origem
+  left_join(centroides, by = c("Origem" = "code_muni")) |>
+  rename(municipio_origem = name_muni) |>
+  
+  # 4. Calcula a porcentagem do município em relação a todo o tráfego intermunicipal do Estado
+  mutate(
+    peso_percentual = round((total_exportado / sum(total_exportado)) * 100, 2)
+  ) |>
+  
+  # 5. Ordena dos maiores responsáveis pelo tráfego para os menores
+  arrange(desc(peso_percentual)) |>
+  select(Origem, municipio_origem, total_exportado, peso_percentual)
+
+# Exibindo os 20 municípios com maior peso no tráfego intermunicipal fluminense
+print(peso_intermunicipal_origem, n = 20)
+```
+
+```{r}
+# Tabela Diagnóstica: Taxa de Evasão / Dependência Externa por Município (0% a 100%)
+diagnostico_dependencia_externa <- tabela_evolucao_mensal |>
+  # 1. Agrupa por cidade de Origem
+  group_by(Origem) |>
+  summarise(
+    # Soma quanto a cidade atendeu dentro dela mesma (Intra)
+    atendimentos_internos = sum(Total_Ano[Origem == Destino], na.rm = TRUE),
+    # Soma quanto a cidade enviou para fora (Inter)
+    atendimentos_externos = sum(Total_Ano[Origem != Destino], na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  
+  # 2. Puxa o nome da cidade
+  left_join(centroides, by = c("Origem" = "code_muni")) |>
+  rename(municipio = name_muni) |>
+  
+  # 3. Calcula o total geral da cidade e a Porcentagem de Dependência Externa
+  mutate(
+    total_geral = atendimentos_internos + atendimentos_externos,
+    taxa_dependencia_externa = round((atendimentos_externos / total_geral) * 100, 1)
+  ) |>
+  
+  # 4. Ordena das cidades 100% dependentes de fora para as mais autossuficientes
+  arrange(desc(taxa_dependencia_externa)) |>
+  select(Origem, municipio, atendimentos_internos, atendimentos_externos, total_geral, taxa_dependencia_externa)
+
+# Abrindo a tabela completa para você inspecionar todos os municípios com 100% ou mais de 80%
+print(diagnostico_dependencia_externa, n = 30)
+
+# Se preferir abrir na aba do RStudio para varrer os 92 municípios:
+# View(diagnostico_dependencia_externa)
+```
+
+## 12. Download do Mapa com Boa Resolução
+
+```{r}
+ggsave(
+  filename = "mapa_fluxo_caps_alta_resolucao.png", 
+  width = 12,        # Largura da imagem
+  height = 7,        # Altura da imagem
+  units = "in",      # Unidade em polegadas
+  dpi = 300,         # 300 DPI = Resolução de altíssima qualidade (sem pixelar)
+  bg = "white"       # Garante fundo branco limpo para o Canva
+)
+```
+
+Caso replique o conteúdo ou utilize quaisquer pacotes, não esqueça de realizar a correta menção dos pesquisadores responsáveis no seu trabalho =D
+
+Bons estudos!
+
+### Att. Jessé Lima (CRMV-RJ 21637)
