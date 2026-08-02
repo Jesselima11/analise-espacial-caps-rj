@@ -1,2 +1,2 @@
-# analise-espacial-caps-rj
-Análise do Fluxo de Procedimentos da RAPS/SUS no Estado do Rio de Janeiro, 2025
+# Territorialização e Fluxos da Rede de Atenção Psicossocial (RAPS) no Estado do Rio de Janeiro
+### Análise Espacial de Deslocamentos Ambulatoriais em CAPS utilizando Microdados do SIA/DATASUS (2025)
