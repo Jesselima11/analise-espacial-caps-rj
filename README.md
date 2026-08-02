@@ -7,7 +7,7 @@
 * Este repositório apresenta o pipeline analítico e cartográfico desenvolvido para avaliar a territorialização e acessibilidade da Rede de Atenção Psicossocial (RAPS) no Estado do Rio de Janeiro em 2025. Por meio do processamento de 1.608.875 procedimentos ambulatoriais do SIA/DATASUS (Forma de Organização 03.01.08 do SIGTAP - Atendimento/Acompanhamento Psicossocial), o projeto mapeia matrizes de fluxo Origem-Destino (O-D) para quantificar a capacidade de retenção intra e intermunicipal da assistência dos CAPS a fim de diagnosticar áreas de vazio assistencial e dependência externa absoluta. O código visa oferecer ferramentas reprodutíveis de análise espacial para pesquisadores e gestores do Sistema Único de Saúde (SUS).
 * Esse trabalho foi desenvolvido como Projeto Final do Curso de Inverno em Introdução à Linguagem R com Dados de Saúde, ofertado pelo ICICT/Fiocruz e ministrado pelo professor Raphael Saldanha, desenvolvedor do pacote microdatasus. Além disso, submeti o presente estudo à publicação para o II Workshop de Geografia da Saúde da UERJ no formato de Resumo Simples.
 * Para a realização desse projeto utilizei o RStudio com os pacotes:
-  1.1 **microdatasus:** processamento e pré-processamento dos microdados do DATASUS.
+  *1.1 **microdatasus:** processamento e pré-processamento dos microdados do DATASUS.
   1.2 **geobr:** download das malhas do estado e dos municípios, com as informações de latitude e longitude.
   1.3 **ggplot2:** elaboração de mapas e gráficos.
   1.4 **sf:** operações geográficas (centróides dos municípios).
