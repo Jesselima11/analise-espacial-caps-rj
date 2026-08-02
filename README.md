@@ -26,6 +26,6 @@ obs.: Municípios que apresentaram 100% de dependência, mas tiveram baixo fluxo
 * **Pressão Metropolitana e Centralidade:** Em termos absolutos de tráfego intermunicipal, a rota **São Gonçalo → Niterói** registrou o maior volume de evasão de pacientes no estado (**n = 1.902 procedimentos**). O achado evidencia a intensa conurbação socioespacial e o papel de referência regional exercido pela rede especializada de Niterói na Região Metropolitana II, mesmo considerando que São Gonçalo apresenta uma taxa de retenção interna de 97,9%.
 * **Modelagem Cartográfica dos Deslocamentos:** Para mapear a dinâmica intermunicipal sem sobreposição visual excessiva, os centroides municipais (extraídos da malha do Censo 2022/IBGE via pacote `geobr`) foram conectados por arcos direções (`geom_curve` no `ggplot2`). A espessura (`linewidth`) e a opacidade (`alpha`) das curvas foram escalonadas em cinco faixas de volume ambulatorial anual, permitindo identificar graficamente desde fluxos residuais até os principais eixos de mobilidade de pacientes em busca de assistência especializada.
 
-![Mapa de Fluxo Intermunicipal de Atendimento Ambulatorial (CAPS) - Estado do Rio de Janeiro (2025)](mapa_fluxo)caps.png)
+![mapadefluxo](mapa_fluxo_caps.png)
 
 ---
