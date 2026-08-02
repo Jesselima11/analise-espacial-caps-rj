@@ -39,3 +39,9 @@ obs.: Municípios que apresentaram 100% de dependência, mas tiveram baixo fluxo
 ![mapadefluxo](mapa_fluxo_caps.png)
 
 ---
+
+## 4. Script Para Reprodução:
+   * Abra o arquivo [`proj_caps_rj.qmd`](proj_caps_rj.qmd) no RStudio.
+   * O código é estruturado como um R Markdown, integrando as narrativas do estudo aos *chunks* de processamento dos microdados do DATASUS (`microdatasus`), agregação das matrizes de fluxo e modelagem cartográfica em alta resolução (`geobr` e `ggplot2`).
+   * O primeiro código foi estruturado para evitar que seja necessário realizar o download de mês a mês do SIA/SUA para o procedimento selecionado, pois cada mês possuí mais de 5 milhões de linhas. A estrutura de código realizada permite que você consiga baixar sem travar, pois realiza uma limpeza automática junto ao donwload das tabelas com as variáveis de escolha previamente selecionadas.
+   * Sinta-se livre para rodar linha por linha ou bloco por bloco de código, mas, não se esqueça de citar na bibliografia o autor do trabalho, assim como os autores dos respectivos pacotes utilizados ;).
